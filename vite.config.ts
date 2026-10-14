@@ -15,4 +15,22 @@ export default defineConfig({
     port: 3000,
     open: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules')) {
+            if (id.includes('recharts')) return 'chart-vendor';
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+              return 'react-vendor';
+            }
+            if (id.includes('@tanstack') || id.includes('axios') || id.includes('zustand')) {
+              return 'query-vendor';
+            }
+            if (id.includes('lucide-react')) return 'ui-vendor';
+          }
+        },
+      },
+    },
+  },
 });
