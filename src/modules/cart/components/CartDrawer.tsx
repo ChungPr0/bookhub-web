@@ -2,6 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, ShoppingBag, ArrowRight } from 'lucide-react';
 import { useCartStore } from '../store/useCartStore';
+import { useAuthStore } from '@/modules/auth/store/useAuthStore';
+import { useAuthModalStore } from '@/modules/auth/store/useAuthModalStore';
 import {
   useCartQuery,
   useUpdateCartItemMutation,
@@ -17,6 +19,8 @@ export const CartDrawer: React.FC = () => {
   const isOpen = useCartStore((state) => state.isDrawerOpen);
   const closeDrawer = useCartStore((state) => state.closeDrawer);
   const toggleGuestSelect = useCartStore((state) => state.toggleGuestSelect);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const openLoginModal = useAuthModalStore((state) => state.openLoginModal);
   const navigate = useNavigate();
 
   const { data: cart, isLoading } = useCartQuery();
@@ -29,6 +33,18 @@ export const CartDrawer: React.FC = () => {
   const subtotal = cart?.selectableSubtotal || 0;
 
   const handleCheckout = () => {
+    if (!isAuthenticated) {
+      openLoginModal({
+        redirectUrl: '/checkout',
+        title: 'Đăng nhập để thanh toán',
+        subtitle: 'Vui lòng đăng nhập để tiếp tục thanh toán giỏ hàng của bạn',
+        onSuccess: () => {
+          closeDrawer();
+          navigate('/checkout');
+        },
+      });
+      return;
+    }
     closeDrawer();
     navigate('/checkout');
   };

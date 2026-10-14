@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Star,
   ShoppingCart,
@@ -13,6 +13,9 @@ import {
   Plus,
 } from 'lucide-react';
 import { useBookDetailQuery, useBookReviewsQuery } from '../hooks/useCatalogQueries';
+import { useAddToCartMutation } from '@/modules/cart/hooks/useCartQueries';
+import { useAuthStore } from '@/modules/auth/store/useAuthStore';
+import { useAuthModalStore } from '@/modules/auth/store/useAuthModalStore';
 import { ReviewItem } from '../components/ReviewItem';
 import { WriteReviewModal } from '../components/WriteReviewModal';
 import { formatVND } from '@/core/utils/currency';
@@ -20,10 +23,10 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { EmptyState } from '@/components/common/EmptyState';
-import { toast } from 'sonner';
 
 export const BookDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const bookId = Number(id);
 
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -32,6 +35,9 @@ export const BookDetailPage: React.FC = () => {
 
   const { data: book, isLoading, isError } = useBookDetailQuery(bookId);
   const { data: reviewData } = useBookReviewsQuery(bookId);
+  const addToCartMutation = useAddToCartMutation();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const openLoginModal = useAuthModalStore((state) => state.openLoginModal);
 
   if (isLoading) {
     return (
@@ -70,12 +76,31 @@ export const BookDetailPage: React.FC = () => {
   const allImages = book.imageUrls && book.imageUrls.length > 0 ? book.imageUrls : [currentImage];
 
   const handleAddToCart = () => {
-    toast.success(`Đã thêm ${quantity} cuốn "${book.title}" vào giỏ hàng`);
+    addToCartMutation.mutate({
+      bookId: book.id,
+      quantity,
+      title: book.title,
+      authorName: book.authorName,
+      salePrice: book.salePrice,
+      listPrice: book.listPrice,
+      primaryImageUrl: book.primaryImageUrl,
+      stockQuantity: book.stockQuantity,
+      inStock: book.inStock,
+    });
   };
 
   const handleBuyNow = () => {
     handleAddToCart();
-    window.location.href = '/checkout';
+    if (!isAuthenticated) {
+      openLoginModal({
+        redirectUrl: '/checkout',
+        title: 'Đăng nhập để thanh toán',
+        subtitle: 'Vui lòng đăng nhập để hoàn tất đơn mua sách của bạn',
+        onSuccess: () => navigate('/checkout'),
+      });
+      return;
+    }
+    navigate('/checkout');
   };
 
   const reviews = reviewData?.reviews?.items || [];

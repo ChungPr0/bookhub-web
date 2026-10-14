@@ -19,6 +19,8 @@ import { useWishlistQuery } from '@/modules/cart/hooks/useCartQueries';
 import { CategoryMegaMenu } from '@/modules/catalog/components/CategoryMegaMenu';
 import { SearchAutocomplete } from '@/modules/catalog/components/SearchAutocomplete';
 import { CartDrawer } from '@/modules/cart/components/CartDrawer';
+import { AuthModal } from '@/modules/auth/components/AuthModal';
+import { useAuthModalStore } from '@/modules/auth/store/useAuthModalStore';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { maskPhone } from '@/core/utils/masking';
@@ -30,6 +32,7 @@ export const CustomerLayout: React.FC = () => {
   const logout = useAuthStore((state) => state.logout);
 
   const openCartDrawer = useCartStore((state) => state.openDrawer);
+  const openModal = useAuthModalStore((state) => state.openModal);
   const { data: cart } = useCartQuery();
   const { data: wishlistData } = useWishlistQuery();
 
@@ -173,16 +176,21 @@ export const CustomerLayout: React.FC = () => {
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Link to="/login">
-                  <Button variant="ghost" size="sm">
-                    Đăng nhập
-                  </Button>
-                </Link>
-                <Link to="/register" className="hidden sm:block">
-                  <Button variant="primary" size="sm">
-                    Đăng ký
-                  </Button>
-                </Link>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => openModal({ mode: 'login' })}
+                >
+                  Đăng nhập
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="hidden sm:inline-flex"
+                  onClick={() => openModal({ mode: 'register' })}
+                >
+                  Đăng ký
+                </Button>
               </div>
             )}
           </div>
@@ -196,6 +204,9 @@ export const CustomerLayout: React.FC = () => {
 
       {/* Cart Drawer Widget */}
       <CartDrawer />
+
+      {/* Global Auth Modal (Login / Register / Forgot Password) */}
+      <AuthModal />
 
       {/* Mobile Bottom Navigation */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-6 py-2 flex items-center justify-between">
@@ -224,13 +235,24 @@ export const CustomerLayout: React.FC = () => {
           <Heart className="w-5 h-5" />
           <span className="text-3xs font-medium">Yêu thích</span>
         </Link>
-        <Link
-          to={isAuthenticated ? '/me/profile' : '/login'}
-          className="flex flex-col items-center gap-0.5 text-slate-600 hover:text-blue-600"
-        >
-          <User className="w-5 h-5" />
-          <span className="text-3xs font-medium">Tài khoản</span>
-        </Link>
+        {isAuthenticated ? (
+          <Link
+            to="/me/profile"
+            className="flex flex-col items-center gap-0.5 text-slate-600 hover:text-blue-600"
+          >
+            <User className="w-5 h-5" />
+            <span className="text-3xs font-medium">Tài khoản</span>
+          </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => openModal({ mode: 'login' })}
+            className="flex flex-col items-center gap-0.5 text-slate-600 hover:text-blue-600 cursor-pointer"
+          >
+            <User className="w-5 h-5" />
+            <span className="text-3xs font-medium">Tài khoản</span>
+          </button>
+        )}
       </div>
 
       {/* Footer */}

@@ -34,13 +34,7 @@ export const App: React.FC = () => {
       authApi
         .getMe()
         .then((userData) => {
-          setUser({
-            id: userData.id,
-            phone: userData.phone,
-            fullName: userData.fullName,
-            role: userData.role,
-            permissions: userData.permissions,
-          });
+          setUser(userData);
         })
         .catch(() => {
           logout();

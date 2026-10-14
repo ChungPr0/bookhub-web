@@ -71,12 +71,12 @@ export const OtpInput: React.FC<OtpInputProps> = ({ value, onChange, disabled, e
             onKeyDown={(e) => handleKeyDown(index, e)}
             onPaste={handlePaste}
             className={cn(
-              'w-11 h-12 text-center text-lg font-bold rounded-lg border bg-white text-slate-900 transition-all select-none',
-              'focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
+              'w-10 h-11 text-center text-lg font-bold rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-all select-none',
+              'focus:outline-hidden focus:ring-2 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-200 dark:focus:border-slate-200',
               error
                 ? 'border-rose-400 focus:border-rose-500 focus:ring-rose-200'
-                : 'border-slate-300 hover:border-slate-400',
-              disabled && 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                : 'border-slate-200 hover:border-slate-300 dark:border-slate-800',
+              disabled && 'bg-slate-50 dark:bg-slate-800 text-slate-400 cursor-not-allowed'
             )}
             aria-label={`Ký tự OTP thứ ${index + 1}`}
           />

@@ -8,6 +8,8 @@ import {
   useClearCartMutation,
 } from '../hooks/useCartQueries';
 import { useCartStore } from '../store/useCartStore';
+import { useAuthStore } from '@/modules/auth/store/useAuthStore';
+import { useAuthModalStore } from '@/modules/auth/store/useAuthModalStore';
 import { CartItemRow } from '../components/CartItemRow';
 import { CartSkeleton } from '../components/CartSkeleton';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -18,6 +20,8 @@ export const CartPage: React.FC = () => {
   const navigate = useNavigate();
   const toggleGuestSelect = useCartStore((state) => state.toggleGuestSelect);
   const toggleGuestSelectAll = useCartStore((state) => state.toggleGuestSelectAll);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const openLoginModal = useAuthModalStore((state) => state.openLoginModal);
 
   const { data: cart, isLoading } = useCartQuery();
   const updateMutation = useUpdateCartItemMutation();
@@ -146,9 +150,20 @@ export const CartPage: React.FC = () => {
           <Button
             variant="primary"
             size="lg"
-            className="w-full font-bold shadow-md"
+            className="w-full font-bold shadow-md cursor-pointer"
             disabled={selectableSubtotal === 0}
-            onClick={() => navigate('/checkout')}
+            onClick={() => {
+              if (!isAuthenticated) {
+                openLoginModal({
+                  redirectUrl: '/checkout',
+                  title: 'Đăng nhập để đặt hàng',
+                  subtitle: 'Đăng nhập để tiếp tục bước thanh toán và vận chuyển',
+                  onSuccess: () => navigate('/checkout'),
+                });
+                return;
+              }
+              navigate('/checkout');
+            }}
             rightIcon={<ArrowRight className="w-4 h-4" />}
           >
             Tiến hành đặt hàng

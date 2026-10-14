@@ -1,15 +1,9 @@
 import { create } from 'zustand';
 import { tokenManager } from '@/core/http/tokenManager';
+import { AuthUserInfo, UserRole } from '../types/auth.types';
 
-export type UserRole = 'CUSTOMER' | 'STAFF' | 'MANAGER' | 'ADMIN';
-
-export interface AuthUser {
-  id: number;
-  phone: string;
-  fullName: string;
-  role: UserRole;
-  permissions: string[];
-}
+export type { UserRole };
+export type AuthUser = AuthUserInfo;
 
 interface AuthState {
   user: AuthUser | null;
@@ -37,4 +31,3 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: null, isAuthenticated: false, isLoading: false });
   },
 }));
-

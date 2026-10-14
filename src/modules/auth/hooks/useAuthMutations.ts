@@ -2,6 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { authApi } from '../api/authApi';
 import { useAuthStore } from '../store/useAuthStore';
+import { useCartStore } from '@/modules/cart/store/useCartStore';
+import { cartApi } from '@/modules/cart/api/cartApi';
 import { LoginRequest, RegisterRequest } from '../types/auth.types';
 
 export const useAuthMutations = () => {
@@ -11,17 +13,35 @@ export const useAuthMutations = () => {
 
   const loginMutation = useMutation({
     mutationFn: (payload: LoginRequest) => authApi.login(payload),
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       setAuth(data.user, data.accessToken, data.refreshToken);
-      toast.success(`Chào mừng trở lại, ${data.user.fullName}!`);
+
+      if (!data.mustChangePassword) {
+        toast.success(`Chào mừng trở lại, ${data.user.fullName}!`);
+
+        // BR-13: CRT-07 Smart Cart Merge immediately after login
+        const guestItems = useCartStore.getState().guestItems;
+        if (guestItems && guestItems.length > 0) {
+          try {
+            const itemsToMerge = guestItems.map((item) => ({
+              bookId: item.bookId,
+              quantity: item.quantity,
+            }));
+            await cartApi.mergeCart({ items: itemsToMerge });
+            useCartStore.getState().clearGuestCart();
+            await queryClient.invalidateQueries({ queryKey: ['cart'] });
+          } catch (err) {
+            console.warn('Smart cart merge error:', err);
+          }
+        }
+      }
     },
   });
 
   const registerMutation = useMutation({
     mutationFn: (payload: RegisterRequest) => authApi.register(payload),
-    onSuccess: (data) => {
-      setAuth(data.user, data.accessToken, data.refreshToken);
-      toast.success('Đăng ký tài khoản thành công!');
+    onSuccess: () => {
+      toast.success('Đăng ký tài khoản thành công! Vui lòng đăng nhập.');
     },
   });
 
@@ -40,4 +60,3 @@ export const useAuthMutations = () => {
     logoutMutation,
   };
 };
-

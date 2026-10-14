@@ -1,3 +1,18 @@
+export type UserRole = 'CUSTOMER' | 'STAFF' | 'MANAGER' | 'ADMIN';
+export type CustomerTier = 'BRONZE' | 'SILVER' | 'GOLD';
+export type Gender = 'MALE' | 'FEMALE' | 'OTHER';
+
+export interface AuthUserInfo {
+  accountId?: number;
+  id?: number;
+  phone: string;
+  fullName: string;
+  role: UserRole;
+  avatarUrl?: string | null;
+  tier?: CustomerTier | null;
+  permissions?: string[];
+}
+
 export interface LoginRequest {
   phone: string;
   password: string;
@@ -6,13 +21,11 @@ export interface LoginRequest {
 export interface LoginResponse {
   accessToken: string;
   refreshToken: string;
-  user: {
-    id: number;
-    phone: string;
-    fullName: string;
-    role: 'CUSTOMER' | 'STAFF' | 'MANAGER' | 'ADMIN';
-    permissions: string[];
-  };
+  tokenType: string;
+  expiresIn: number;
+  refreshExpiresIn: number;
+  mustChangePassword: boolean;
+  user: AuthUserInfo;
 }
 
 export interface RequestOtpRequest {
@@ -27,21 +40,31 @@ export interface RequestOtpResponse {
 
 export interface RegisterRequest {
   phone: string;
-  otp: string;
+  otpCode: string;
   fullName: string;
   password: string;
+  gender: Gender;
+  email?: string | null;
+  birthday?: string | null;
+}
+
+export interface RegisterResponse {
+  phone: string;
+  fullName: string;
 }
 
 export interface ForgotPasswordVerifyRequest {
   phone: string;
-  otp: string;
+  otpCode: string;
 }
 
 export interface ForgotPasswordVerifyResponse {
   resetToken: string;
+  expiresInSeconds?: number;
 }
 
 export interface ResetPasswordRequest {
+  phone: string;
   resetToken: string;
   newPassword: string;
 }
@@ -51,3 +74,10 @@ export interface ChangePasswordRequest {
   newPassword: string;
 }
 
+export interface ChangePasswordResponse {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresIn: number;
+  refreshExpiresIn: number;
+}

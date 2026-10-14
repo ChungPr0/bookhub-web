@@ -1,11 +1,14 @@
 import { axiosClient } from '@/core/http/axiosClient';
 import {
+  AuthUserInfo,
   ChangePasswordRequest,
+  ChangePasswordResponse,
   ForgotPasswordVerifyRequest,
   ForgotPasswordVerifyResponse,
   LoginRequest,
   LoginResponse,
   RegisterRequest,
+  RegisterResponse,
   RequestOtpRequest,
   RequestOtpResponse,
   ResetPasswordRequest,
@@ -22,8 +25,8 @@ export const authApi = {
     return res.data;
   },
 
-  register: async (payload: RegisterRequest): Promise<LoginResponse> => {
-    const res = await axiosClient.post<LoginResponse>('/auth/register', payload);
+  register: async (payload: RegisterRequest): Promise<RegisterResponse> => {
+    const res = await axiosClient.post<RegisterResponse>('/auth/register', payload);
     return res.data;
   },
 
@@ -35,13 +38,14 @@ export const authApi = {
     await axiosClient.post<null>('/auth/logout-all');
   },
 
-  getMe: async (): Promise<LoginResponse['user']> => {
-    const res = await axiosClient.get<LoginResponse['user']>('/auth/me');
+  getMe: async (): Promise<AuthUserInfo> => {
+    const res = await axiosClient.get<AuthUserInfo>('/auth/me');
     return res.data;
   },
 
-  changePassword: async (payload: ChangePasswordRequest): Promise<void> => {
-    await axiosClient.put<null>('/auth/password', payload);
+  changePassword: async (payload: ChangePasswordRequest): Promise<ChangePasswordResponse> => {
+    const res = await axiosClient.put<ChangePasswordResponse>('/auth/password', payload);
+    return res.data;
   },
 
   requestForgotOtp: async (payload: RequestOtpRequest): Promise<RequestOtpResponse> => {
@@ -58,4 +62,3 @@ export const authApi = {
     await axiosClient.post<null>('/auth/password/forgot/reset', payload);
   },
 };
-
