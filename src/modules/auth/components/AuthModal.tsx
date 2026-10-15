@@ -2,6 +2,7 @@ import React, { useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthModalStore } from '../store/useAuthModalStore';
 import { AuthCard } from './AuthCard';
+import { AuthShell } from './AuthShell';
 
 export const AuthModal: React.FC = () => {
   const isOpen = useAuthModalStore((state) => state.isOpen);
@@ -53,20 +54,22 @@ export const AuthModal: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm auth-modal-overlay overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm auth-modal-overlay overflow-y-auto"
       onClick={handleBackdropClick}
       role="dialog"
       aria-modal="true"
       aria-labelledby="auth-modal-title"
     >
-      <div className="relative w-full max-w-[420px] my-auto auth-modal-container">
-        <AuthCard
-          initialMode={mode}
-          onSuccess={handleSuccess}
-          onClose={closeModal}
-          redirectUrl={redirectUrl}
-          isModal={true}
-        />
+      <div className="relative w-full max-w-[960px] my-auto auth-modal-container">
+        <AuthShell isModal={true} onClose={closeModal}>
+          <AuthCard
+            initialMode={mode}
+            onSuccess={handleSuccess}
+            onClose={closeModal}
+            redirectUrl={redirectUrl}
+            isModal={true}
+          />
+        </AuthShell>
       </div>
     </div>
   );

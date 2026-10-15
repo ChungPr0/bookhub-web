@@ -1,4 +1,5 @@
 import React from 'react';
+import { cn } from '@/core/utils/cn';
 
 export interface PhoneInputProps {
   id?: string;
@@ -28,11 +29,14 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
     return (
       <div className="w-full">
         <div
-          className={`relative flex items-center h-11 rounded-xl border bg-white dark:bg-slate-900 transition-colors focus-within:ring-1 focus-within:ring-slate-950 focus-within:border-slate-950 dark:focus-within:ring-slate-100 dark:focus-within:border-slate-100 ${
+          className={cn(
+            'relative flex items-center h-10 rounded-xl border bg-white dark:bg-slate-900 transition-colors focus-within:ring-1 focus-within:ring-slate-950 focus-within:border-slate-950 dark:focus-within:ring-slate-100 dark:focus-within:border-slate-100',
             error
               ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800 dark:bg-rose-950/20'
-              : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700'
-          } ${disabled ? 'opacity-50 bg-slate-50 dark:bg-slate-800 pointer-events-none' : ''} ${className}`}
+              : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700',
+            disabled && 'opacity-50 bg-slate-50 dark:bg-slate-800 pointer-events-none',
+            className
+          )}
         >
           {/* Prefix +84 seamlessly integrated with identical font and height */}
           <div className="flex items-center px-3.5 h-full border-r border-slate-200 dark:border-slate-800 select-none shrink-0">

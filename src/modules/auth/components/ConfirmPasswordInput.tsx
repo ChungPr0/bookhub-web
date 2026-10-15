@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Lock, Eye, EyeOff, Check, X } from 'lucide-react';
+import React from 'react';
+import { Lock, Check, X } from 'lucide-react';
 import { evaluatePasswordStrength } from '../schemas/authSchemas';
 
 export interface ConfirmPasswordInputProps {
@@ -31,8 +31,6 @@ export const ConfirmPasswordInput: React.FC<ConfirmPasswordInputProps> = ({
   onKeyDown,
   capsLockOn = false,
 }) => {
-  const [showPassword, setShowPassword] = useState(false);
-
   const hasValue = value.length > 0;
   const isMatching = hasValue && value === targetPassword;
   const isTargetValid = evaluatePasswordStrength(targetPassword).isValidBR01;
@@ -60,7 +58,7 @@ export const ConfirmPasswordInput: React.FC<ConfirmPasswordInputProps> = ({
         </div>
         <input
           id={id}
-          type={showPassword ? 'text' : 'password'}
+          type="password"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
@@ -68,7 +66,7 @@ export const ConfirmPasswordInput: React.FC<ConfirmPasswordInputProps> = ({
           autoComplete={autoComplete}
           disabled={disabled}
           maxLength={64}
-          className={`w-full h-11 pl-10 pr-10 text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${
+          className={`w-full h-10 pl-10 pr-3.5 text-xs sm:text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${
             isMismatch || error
               ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800 dark:bg-rose-950/20 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100'
               : isFullyMatched
@@ -76,15 +74,6 @@ export const ConfirmPasswordInput: React.FC<ConfirmPasswordInputProps> = ({
                 : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100'
           }`}
         />
-        <button
-          type="button"
-          onClick={() => setShowPassword((prev) => !prev)}
-          tabIndex={-1}
-          className="absolute right-3.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
-          aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-        >
-          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-        </button>
       </div>
 
       {/* Real-time Match Indicator */}

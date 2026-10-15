@@ -7,12 +7,11 @@ export const RegisterPage: React.FC = () => {
   const redirectUrl = searchParams.get('redirect') || '/';
 
   return (
-    <div className="w-full flex justify-center py-4">
-      <AuthCard
-        initialMode="register"
-        redirectUrl={redirectUrl}
-        isModal={false}
-      />
-    </div>
+    <AuthCard
+      key="register"
+      initialMode="register"
+      redirectUrl={redirectUrl}
+      isModal={false}
+    />
   );
 };

@@ -7,12 +7,11 @@ export const LoginPage: React.FC = () => {
   const redirectUrl = searchParams.get('redirect') || '/';
 
   return (
-    <div className="w-full flex justify-center py-4">
-      <AuthCard
-        initialMode="login"
-        redirectUrl={redirectUrl}
-        isModal={false}
-      />
-    </div>
+    <AuthCard
+      key="login"
+      initialMode="login"
+      redirectUrl={redirectUrl}
+      isModal={false}
+    />
   );
 };

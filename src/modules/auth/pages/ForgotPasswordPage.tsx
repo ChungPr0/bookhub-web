@@ -7,12 +7,11 @@ export const ForgotPasswordPage: React.FC = () => {
   const redirectUrl = searchParams.get('redirect') || '/';
 
   return (
-    <div className="w-full flex justify-center py-4">
-      <AuthCard
-        initialMode="forgot_password"
-        redirectUrl={redirectUrl}
-        isModal={false}
-      />
-    </div>
+    <AuthCard
+      key="forgot_password"
+      initialMode="forgot_password"
+      redirectUrl={redirectUrl}
+      isModal={false}
+    />
   );
 };

@@ -5,16 +5,12 @@ import {
   User,
   Mail,
   Calendar,
-  Eye,
-  EyeOff,
-  X,
   ArrowLeft,
   Loader2,
   AlertCircle,
   ShoppingBag,
-  BookOpen,
   KeyRound,
-  RotateCcw,
+  ChevronDown,
 } from 'lucide-react';
 import { useAuthMutations } from '../hooks/useAuthMutations';
 import { authApi } from '../api/authApi';
@@ -53,50 +49,32 @@ export interface AuthCardProps {
 }
 
 export const AuthCard: React.FC<AuthCardProps> = ({
-  initialMode,
+  initialMode = 'login',
   onSuccess,
   onClose,
   redirectUrl,
   isModal = true,
 }) => {
   const navigate = useNavigate();
-  const setStoreMode = useAuthModalStore((state) => state.setMode);
+  const initialDraft = loadAuthDraft();
 
-  // Load persisted draft state from sessionStorage
-  const [initialDraft] = useState(() => loadAuthDraft());
+  const [mode, setMode] = useState<AuthModalMode>(initialMode);
 
-  // Determine starting mode: priority given to explicit prop, then store, then saved draft
-  const [mode, setModeState] = useState<AuthModalMode>(() => {
-    if (initialMode) return initialMode;
-    return initialDraft.activeView || 'login';
-  });
-
-  const setMode = (newMode: AuthModalMode) => {
-    setModeState(newMode);
-    setStoreMode(newMode);
-    if (newMode === 'login' || newMode === 'register' || newMode === 'forgot_password') {
-      saveAuthDraft({ activeView: newMode });
-    }
-  };
-
-  // Common UI state
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [capsLockOn, setCapsLockOn] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [capsLockOn, setCapsLockOn] = useState(false);
 
   // -------------------------------------------------------------
   // LUỒNG A: ĐĂNG NHẬP (AUTH-03)
   // -------------------------------------------------------------
-  const [loginPhone, setLoginPhone] = useState<string>(() => initialDraft.loginPhone || '');
+  const [loginPhone, setLoginPhone] = useState(() => initialDraft.loginPhone || '');
   const [loginPassword, setLoginPassword] = useState(() => authMemoryState.loginPassword || '');
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [lockoutSeconds, setLockoutSeconds] = useState<number | null>(null);
 
   // -------------------------------------------------------------
-  // LUỒNG B: ĐĂNG KÝ (AUTH-01 & AUTH-02)
+  // LUỒNG B: ĐĂNG KÝ (AUTH-01 & AUTH-02) — COMPACT 5-ROW FORM
   // -------------------------------------------------------------
-  const [registerStep, setRegisterStep] = useState<1 | 2>(() => initialDraft.registerStep || 1);
   const [registerPhone, setRegisterPhone] = useState(() => initialDraft.registerDraft.phone || '');
   const [registerFullName, setRegisterFullName] = useState(() => initialDraft.registerDraft.fullName || '');
   const [registerGender, setRegisterGender] = useState<Gender>(() => initialDraft.registerDraft.gender || 'OTHER');
@@ -105,8 +83,16 @@ export const AuthCard: React.FC<AuthCardProps> = ({
   const [registerPassword, setRegisterPassword] = useState(() => authMemoryState.registerPassword || '');
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState(() => authMemoryState.registerConfirmPassword || '');
   const [registerOtp, setRegisterOtp] = useState(() => authMemoryState.registerOtp || '');
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
 
-  // Timestamps for real-time countdown persistence
+  const [isOtpSent, setIsOtpSent] = useState<boolean>(() => {
+    return Boolean(
+      initialDraft.registerDraft.isOtpSent ||
+      initialDraft.registerDraft.resendAvailableAt ||
+      initialDraft.registerDraft.otpExpiresAt
+    );
+  });
+
   const [registerResendAvailableAt, setRegisterResendAvailableAt] = useState<number | null>(
     () => initialDraft.registerDraft.resendAvailableAt
   );
@@ -134,7 +120,6 @@ export const AuthCard: React.FC<AuthCardProps> = ({
   const [currentPassword, setCurrentPassword] = useState(() => authMemoryState.currentPassword || '');
   const [forcedNewPassword, setForcedNewPassword] = useState(() => authMemoryState.forcedNewPassword || '');
   const [forcedConfirmPassword, setForcedConfirmPassword] = useState(() => authMemoryState.forcedConfirmPassword || '');
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
 
   const { loginMutation } = useAuthMutations();
   const phoneInputRef = useRef<HTMLInputElement>(null);
@@ -188,8 +173,21 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     setMode(newMode);
     setFieldErrors({});
     setGeneralError(null);
-    setShowLoginPassword(false);
-    setShowCurrentPassword(false);
+    if (newMode !== 'forced_change_password') {
+      saveAuthDraft({ activeView: newMode });
+    }
+    if (isModal) {
+      useAuthModalStore.getState().setMode(newMode);
+    }
+  };
+
+  const handleSwitchMode = (newMode: AuthModalMode) => {
+    switchMode(newMode);
+    if (!isModal) {
+      if (newMode === 'login') navigate('/login');
+      else if (newMode === 'register') navigate('/register');
+      else if (newMode === 'forgot_password') navigate('/forgot-password');
+    }
   };
 
   const clearFieldError = (field: string) => {
@@ -221,9 +219,6 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  /**
-   * Helper: Map backend 400 VALIDATION_FAILED errors[] directly into form field errors
-   */
   const handleValidationErrors = (error: ApiErrorResponse) => {
     if (error?.errors && Array.isArray(error.errors) && error.errors.length > 0) {
       const mapped: Record<string, string> = {};
@@ -267,7 +262,6 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     setFieldErrors({});
     setGeneralError(null);
 
-    // Save phone to draft
     saveAuthDraft({ loginPhone: normalized });
 
     loginMutation.mutate(
@@ -275,8 +269,6 @@ export const AuthCard: React.FC<AuthCardProps> = ({
       {
         onSuccess: (data) => {
           setIsSubmitting(false);
-
-          // Kiểm tra đặc biệt: mustChangePassword === true (tài khoản UNVERIFIED)
           if (data.mustChangePassword) {
             setMode('forced_change_password');
             setCurrentPassword(loginPassword);
@@ -290,7 +282,6 @@ export const AuthCard: React.FC<AuthCardProps> = ({
           setIsSubmitting(false);
           const error = err as ApiErrorResponse;
 
-          // Rẽ nhánh logic chặt chẽ theo error.code
           switch (error?.code) {
             case 'ACCOUNT_TEMPORARILY_LOCKED': {
               const retryAfter =
@@ -332,10 +323,9 @@ export const AuthCard: React.FC<AuthCardProps> = ({
   // =========================================================================
   // 2. XỬ LÝ LUỒNG B: ĐĂNG KÝ (AUTH-01 & AUTH-02)
   // =========================================================================
-  // Bước 1: Yêu cầu OTP đăng ký (AUTH-01)
-  const handleRegisterRequestOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isSubmitting) return;
+  const handleRegisterRequestOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (isSubmitting || isSendingOtp || registerCooldown > 0) return;
 
     const errors: Record<string, string> = {};
     const normalized = normalizePhoneToZero(registerPhone);
@@ -351,7 +341,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
       return;
     }
 
-    setIsSubmitting(true);
+    setIsSendingOtp(true);
     setFieldErrors({});
     setGeneralError(null);
 
@@ -363,11 +353,9 @@ export const AuthCard: React.FC<AuthCardProps> = ({
 
       setRegisterResendAvailableAt(resendAt);
       setRegisterOtpExpiresAt(expiresAt);
-      setRegisterStep(2);
+      setIsOtpSent(true);
 
-      // Save draft state to sessionStorage
       saveAuthDraft({
-        registerStep: 2,
         registerDraft: {
           phone: normalized,
           fullName: registerFullName,
@@ -380,7 +368,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
         },
       });
 
-      toast.success(`Mã xác thực OTP đã được gửi đến số điện thoại của bạn.`);
+      toast.success('Mã xác thực OTP đã được gửi đến số điện thoại của bạn');
     } catch (err: unknown) {
       const error = err as ApiErrorResponse;
       switch (error?.code) {
@@ -408,68 +396,29 @@ export const AuthCard: React.FC<AuthCardProps> = ({
         }
       }
     } finally {
-      setIsSubmitting(false);
+      setIsSendingOtp(false);
     }
   };
 
-  // Gửi lại mã OTP đăng ký
-  const handleResendRegisterOtp = async () => {
-    if (registerCooldown > 0 || isSubmitting) return;
-    setIsSubmitting(true);
-    try {
-      const normalized = normalizePhoneToZero(registerPhone);
-      const res = await authApi.requestRegisterOtp({ phone: normalized });
-      const now = Date.now();
-      const resendAt = now + (res.resendAfterSeconds || 60) * 1000;
-      const expiresAt = now + (res.otpExpiresInSeconds || 300) * 1000;
-
-      setRegisterResendAvailableAt(resendAt);
-      setRegisterOtpExpiresAt(expiresAt);
-
-      saveAuthDraft({
-        registerDraft: {
-          phone: normalized,
-          fullName: registerFullName,
-          gender: registerGender,
-          email: registerEmail,
-          birthday: registerBirthday,
-          isOtpSent: true,
-          resendAvailableAt: resendAt,
-          otpExpiresAt: expiresAt,
-        },
-      });
-
-      toast.success('Đã gửi lại mã xác thực OTP');
-    } catch (err: unknown) {
-      const error = err as ApiErrorResponse;
-      toast.error(error?.message || 'Gửi lại mã OTP thất bại');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Đổi số điện thoại khác / Làm mới form Đăng ký
-  const handleResetRegisterForm = () => {
-    clearRegisterDraft();
-    setRegisterStep(1);
-    setRegisterOtp('');
-    setRegisterResendAvailableAt(null);
-    setRegisterOtpExpiresAt(null);
-    setFieldErrors({});
-    setGeneralError(null);
-  };
-
-  // Bước 2: Hoàn tất Đăng ký (AUTH-02)
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
 
     const errors: Record<string, string> = {};
+    const normalized = normalizePhoneToZero(registerPhone);
     const trimmedOtp = registerOtp.trim();
     const trimmedName = registerFullName.trim();
     const trimmedEmail = registerEmail.trim();
 
-    if (!trimmedOtp || trimmedOtp.length !== 6) {
+    if (!registerPhone.trim()) {
+      errors.phone = 'Vui lòng nhập số điện thoại';
+    } else if (!isValidPhone(registerPhone)) {
+      errors.phone = 'Số điện thoại không đúng định dạng';
+    } else if (!isOtpSent) {
+      errors.phone = 'Vui lòng nhấn nút Gửi OTP để nhận mã xác thực';
+    }
+
+    if (isOtpSent && (!trimmedOtp || trimmedOtp.length !== 6)) {
       errors.otpCode = 'Mã OTP gồm đúng 6 chữ số';
     }
 
@@ -509,9 +458,8 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     setFieldErrors({});
     setGeneralError(null);
 
-    // Chuẩn payload JSON: Trường rỗng gửi null hoặc lược bỏ, tuyệt đối không gửi ""
     const payload: RegisterRequest = {
-      phone: normalizePhoneToZero(registerPhone),
+      phone: normalized,
       otpCode: trimmedOtp,
       fullName: trimmedName,
       password: registerPassword,
@@ -523,13 +471,13 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     try {
       const res = await authApi.register(payload);
       clearRegisterDraft();
+      setIsOtpSent(false);
       toast.success('Đăng ký tài khoản thành công! Vui lòng đăng nhập.');
 
-      // Hệ thống KHÔNG tự động đăng nhập. Chuyển về màn Đăng nhập và điền sẵn SĐT
-      setLoginPhone(res.phone || normalizePhoneToZero(registerPhone));
+      setLoginPhone(res.phone || normalized);
       setLoginPassword('');
-      saveAuthDraft({ activeView: 'login', loginPhone: res.phone || normalizePhoneToZero(registerPhone) });
-      switchMode('login');
+      saveAuthDraft({ activeView: 'login', loginPhone: res.phone || normalized });
+      handleSwitchMode('login');
     } catch (err: unknown) {
       const error = err as ApiErrorResponse;
       switch (error?.code) {
@@ -543,7 +491,7 @@ export const AuthCard: React.FC<AuthCardProps> = ({
           break;
         }
         case 'OTP_EXPIRED': {
-          setFieldErrors({ otpCode: 'Mã OTP đã hết hiệu lực, vui lòng yêu cầu mã mới' });
+          setFieldErrors({ otpCode: 'Mã OTP đã hết hiệu lực, vui lòng gửi lại mã mới' });
           break;
         }
         case 'OTP_ATTEMPTS_EXCEEDED': {
@@ -575,7 +523,6 @@ export const AuthCard: React.FC<AuthCardProps> = ({
   // =========================================================================
   // 3. XỬ LÝ LUỒNG C: QUÊN MẬT KHẨU 3 BƯỚC (AUTH-09 -> AUTH-10 -> AUTH-11)
   // =========================================================================
-  // Bước 1: Yêu cầu OTP khôi phục (AUTH-09)
   const handleForgotRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -648,7 +595,6 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     }
   };
 
-  // Bước 2: Xác thực OTP nhận resetToken (AUTH-10)
   const handleForgotVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -708,7 +654,6 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     }
   };
 
-  // Bước 3: Đặt lại mật khẩu mới (AUTH-11)
   const handleForgotResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -744,11 +689,10 @@ export const AuthCard: React.FC<AuthCardProps> = ({
       setResetToken('');
       toast.success('Đặt lại mật khẩu thành công! Vui lòng đăng nhập.');
 
-      // Chuyển về màn Đăng nhập và điền sẵn SĐT
       setLoginPhone(normalizePhoneToZero(forgotPhone));
       setLoginPassword('');
       saveAuthDraft({ activeView: 'login', loginPhone: normalizePhoneToZero(forgotPhone) });
-      switchMode('login');
+      handleSwitchMode('login');
     } catch (err: unknown) {
       const error = err as ApiErrorResponse;
       switch (error?.code) {
@@ -843,434 +787,390 @@ export const AuthCard: React.FC<AuthCardProps> = ({
     }
   };
 
+  const isShortForm = mode === 'login' || (mode === 'forgot_password' && forgotStep !== 3);
+
   return (
-    <div
-      className="w-full bg-white dark:bg-slate-950 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xl p-6 sm:p-8 relative text-slate-900 dark:text-slate-100 transition-all duration-200"
-      role="region"
-      aria-label="Cửa sổ xác thực BookHub"
-    >
-      {/* Nút đóng X ở góc trên bên phải */}
-      {isModal && onClose && (
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-4 top-4 p-2 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors cursor-pointer"
-          aria-label="Đóng cửa sổ"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      )}
-
-      {/* Brand Header */}
-      <div className="mb-6">
-        <div className="flex items-center gap-2.5 mb-3">
-          <div className="w-9 h-9 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center shadow-xs">
-            <BookOpen className="w-4 h-4 stroke-[2.2]" />
-          </div>
+    <div className="w-full h-full flex flex-col justify-between min-h-0 px-6 py-4 sm:px-8 sm:py-5 bg-white dark:bg-slate-950 relative overflow-hidden text-slate-900 dark:text-slate-100">
+      {/* ------------------------------------------------------------- */}
+      {/* HEADER: Dynamic Title + Segmented Switcher Pill                 */}
+      {/* ------------------------------------------------------------- */}
+      <div className="shrink-0 mb-2">
+        <div className="flex items-center justify-between mb-2">
+          {/* Dynamic Mode Title */}
           <div>
-            <span className="text-base font-bold tracking-tight block leading-none">BookHub</span>
-            <span className="text-[11px] text-slate-500 font-medium leading-none">Nhà sách trực tuyến</span>
+            <h2 id="auth-modal-title" className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
+              {mode === 'login' && 'Đăng nhập tài khoản'}
+              {mode === 'register' && 'Đăng ký tài khoản'}
+              {mode === 'forgot_password' && 'Khôi phục mật khẩu'}
+              {mode === 'forced_change_password' && 'Đổi mật khẩu bắt buộc'}
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-0.5 line-clamp-1">
+              {mode === 'login' && 'Chào mừng bạn trở lại!'}
+              {mode === 'register' && 'Nhập số điện thoại và thông tin.'}
+              {mode === 'forgot_password' &&
+                (forgotStep === 1
+                  ? 'Nhập số điện thoại đăng ký để nhận mã OTP khôi phục.'
+                  : forgotStep === 2
+                    ? `Nhập mã 6 chữ số đã gửi đến ${maskPhone(normalizePhoneToZero(forgotPhone))}.`
+                    : 'Thiết lập mật khẩu mới an toàn cho tài khoản.')}
+              {mode === 'forced_change_password' &&
+                'Tài khoản mới cần cập nhật mật khẩu lần đầu để tiếp tục sử dụng.'}
+            </p>
           </div>
-        </div>
 
-        {/* Dynamic Mode Heading */}
-        <h2 id="auth-modal-title" className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
-          {mode === 'login' && 'Đăng nhập tài khoản'}
-          {mode === 'register' && (registerStep === 1 ? 'Đăng ký tài khoản' : 'Hoàn tất thông tin')}
-          {mode === 'forgot_password' && 'Khôi phục mật khẩu'}
-          {mode === 'forced_change_password' && 'Đổi mật khẩu bắt buộc'}
-        </h2>
-        <p className="text-xs sm:text-sm text-slate-500 mt-1">
-          {mode === 'login' && 'Chào mừng bạn trở lại! Nhập số điện thoại để tiếp tục.'}
-          {mode === 'register' &&
-            (registerStep === 1
-              ? 'Nhập số điện thoại của bạn để nhận mã xác thực OTP.'
-              : `Xác thực OTP và điền thông tin để tạo tài khoản mới.`)}
-          {mode === 'forgot_password' &&
-            (forgotStep === 1
-              ? 'Nhập số điện thoại đăng ký tài khoản để nhận mã OTP khôi phục.'
-              : forgotStep === 2
-                ? `Nhập mã 6 chữ số đã gửi đến ${maskPhone(normalizePhoneToZero(forgotPhone))}.`
-                : 'Thiết lập mật khẩu mới an toàn cho tài khoản.')}
-          {mode === 'forced_change_password' &&
-            'Tài khoản mới cần cập nhật mật khẩu lần đầu để tiếp tục sử dụng.'}
-        </p>
+          {/* Quick Switcher / Back Link */}
+          {(mode === 'login' || mode === 'register') && (
+            <div className={`flex p-0.5 bg-slate-100 dark:bg-slate-900 rounded-lg text-xs font-semibold shrink-0 ${isModal ? 'mr-7 sm:mr-8' : ''}`}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (registerPhone.trim()) {
+                    setLoginPhone(registerPhone);
+                    saveAuthDraft({ loginPhone: registerPhone });
+                  }
+                  handleSwitchMode('login');
+                }}
+                className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                  mode === 'login'
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Đăng nhập
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (loginPhone.trim()) {
+                    setRegisterPhone(loginPhone);
+                    saveAuthDraft({ registerDraft: { ...initialDraft.registerDraft, phone: loginPhone } });
+                  }
+                  handleSwitchMode('register');
+                }}
+                className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                  mode === 'register'
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                Đăng ký
+              </button>
+            </div>
+          )}
+
+          {mode === 'forgot_password' && (
+            <button
+              type="button"
+              onClick={() => handleSwitchMode('login')}
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors cursor-pointer shrink-0 ${isModal ? 'mr-7 sm:mr-8' : ''}`}
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Đăng nhập</span>
+            </button>
+          )}
+        </div>
 
         {/* Checkout pill if user was on checkout path */}
         {redirectUrl === '/checkout' && (
-          <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 text-xs font-medium border border-slate-200/80 dark:border-slate-800">
-            <ShoppingBag className="w-3.5 h-3.5 text-slate-900 dark:text-slate-100" />
+          <div className="mt-1 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 text-[11px] font-medium border border-slate-200/80 dark:border-slate-800">
+            <ShoppingBag className="w-3 h-3 text-slate-900 dark:text-slate-100" />
             <span>Đăng nhập để hoàn tất đơn hàng</span>
+          </div>
+        )}
+
+        {/* General Alert Message */}
+        {generalError && (
+          <div className="mt-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/50 text-rose-700 dark:text-rose-400 text-xs flex items-start gap-2 animate-in fade-in-50 duration-150">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="flex-1 font-medium">{generalError}</div>
+          </div>
+        )}
+
+        {/* Lockout Box for BR-03 */}
+        {lockoutSeconds !== null && (
+          <div className="mt-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-amber-600 shrink-0 auth-lockout-pulse" />
+              <div>
+                <p className="font-semibold">Tài khoản tạm thời bị khóa</p>
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  Nhập sai 5 lần liên tiếp. Vui lòng chờ mở khóa.
+                </p>
+              </div>
+            </div>
+            <span className="font-mono text-sm font-bold bg-white dark:bg-slate-900 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800">
+              {formatCountdown(lockoutSeconds)}
+            </span>
           </div>
         )}
       </div>
 
-      {/* Segmented Tabs (Login / Register) */}
-      {mode === 'login' || mode === 'register' ? (
-        <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-xl mb-6 text-sm font-semibold">
-          <button
-            type="button"
-            onClick={() => switchMode('login')}
-            className={`py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all cursor-pointer ${
-              mode === 'login'
-                ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
-                : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-          >
-            Đăng nhập
-          </button>
-          <button
-            type="button"
-            onClick={() => switchMode('register')}
-            className={`py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all cursor-pointer ${
-              mode === 'register'
-                ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-xs'
-                : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-          >
-            Đăng ký
-          </button>
-        </div>
-      ) : mode === 'forgot_password' ? (
-        <div className="mb-5">
-          <button
-            type="button"
-            onClick={() => switchMode('login')}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors cursor-pointer"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Quay lại đăng nhập</span>
-          </button>
-        </div>
-      ) : null}
-
-      {/* General Alert Message */}
-      {generalError && (
-        <div className="mb-5 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/50 text-rose-700 dark:text-rose-400 text-xs flex items-start gap-2.5 animate-in fade-in-50 duration-150">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="flex-1 font-medium">{generalError}</div>
-        </div>
-      )}
-
-      {/* Lockout Box for BR-03 */}
-      {lockoutSeconds !== null && (
-        <div className="mb-5 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Lock className="w-4 h-4 text-amber-600 shrink-0 auth-lockout-pulse" />
-            <div>
-              <p className="font-semibold">Tài khoản tạm thời bị khóa</p>
-              <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
-                Nhập sai 5 lần liên tiếp. Vui lòng chờ mở khóa.
-              </p>
-            </div>
-          </div>
-          <span className="font-mono text-sm font-bold bg-white dark:bg-slate-900 px-2 py-1 rounded-md border border-amber-200 dark:border-amber-800">
-            {formatCountdown(lockoutSeconds)}
-          </span>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* LUỒNG A: ĐĂNG NHẬP (AUTH-03) */}
-      {/* ========================================================================= */}
-      {mode === 'login' && (
-        <div className="auth-view-transition">
-          <form onSubmit={handleLoginSubmit} noValidate className="space-y-4">
-            {/* PhoneInput */}
-            <div className="space-y-1.5">
-              <label htmlFor="login-phone" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Số điện thoại
-              </label>
-              <PhoneInput
-                ref={phoneInputRef}
-                id="login-phone"
-                value={loginPhone}
-                onChange={(val) => {
-                  setLoginPhone(val);
-                  clearFieldError('phone');
-                  saveAuthDraft({ loginPhone: val });
-                }}
-                disabled={isSubmitting || lockoutSeconds !== null}
-                error={fieldErrors.phone}
-              />
-            </div>
-
-            {/* Password input */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label htmlFor="login-password" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Mật khẩu
-                </label>
-                {capsLockOn && (
-                  <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1.5 py-0.5 rounded">
-                    Bật Caps Lock
-                  </span>
-                )}
-              </div>
-              <div className="relative flex items-center">
-                <div className="absolute left-3.5 text-slate-400 pointer-events-none">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <input
-                  id="login-password"
-                  type={showLoginPassword ? 'text' : 'password'}
-                  value={loginPassword}
-                  onChange={(e) => {
-                    setLoginPassword(e.target.value);
-                    authMemoryState.loginPassword = e.target.value;
-                    clearFieldError('password');
-                  }}
-                  onKeyDown={handlePasswordKeyDown}
-                  onKeyUp={handlePasswordKeyDown}
-                  placeholder="Nhập mật khẩu"
-                  autoComplete="current-password"
-                  disabled={isSubmitting || lockoutSeconds !== null}
-                  className={`w-full h-11 pl-10 pr-10 text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${
-                    fieldErrors.password
-                      ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800 dark:bg-rose-950/20'
-                      : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700'
-                  }`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowLoginPassword((prev) => !prev)}
-                  tabIndex={-1}
-                  className="absolute right-3.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
-                  aria-label={showLoginPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                >
-                  {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {fieldErrors.password && (
-                <p className="text-xs text-rose-500 font-medium mt-1">{fieldErrors.password}</p>
-              )}
-            </div>
-
-            {/* Forgot Password link */}
-            <div className="flex items-center justify-end pt-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setForgotPhone(loginPhone);
-                  switchMode('forgot_password');
-                }}
-                className="text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:underline cursor-pointer"
-              >
-                Quên mật khẩu?
-              </button>
-            </div>
-
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={isSubmitting || lockoutSeconds !== null}
-              className="w-full h-11 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none mt-2"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Đang xử lý</span>
-                </>
-              ) : (
-                <span>Đăng nhập</span>
-              )}
-            </button>
-          </form>
-
-          {/* Bottom Switch Link */}
-          <div className="mt-6 text-center text-xs text-slate-500">
-            Chưa có tài khoản?{' '}
-            <button
-              type="button"
-              onClick={() => {
-                setRegisterPhone(loginPhone);
-                switchMode('register');
-              }}
-              className="font-semibold text-slate-900 dark:text-slate-100 hover:underline cursor-pointer"
-            >
-              Đăng ký ngay
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* LUỒNG B: ĐĂNG KÝ (AUTH-01 & AUTH-02) */}
-      {/* ========================================================================= */}
-      {mode === 'register' && (
-        <div className="auth-view-transition">
-          {registerStep === 1 ? (
-            /* Bước 1: Gửi mã OTP đăng ký */
-            <form onSubmit={handleRegisterRequestOtp} noValidate className="space-y-4">
+      {/* ------------------------------------------------------------- */}
+      {/* MIDDLE CONTENT: Form Area (Centered or Scrollable)            */}
+      {/* ------------------------------------------------------------- */}
+      <div
+        className={`w-full min-h-0 ${
+          isShortForm
+            ? 'flex-1 flex flex-col justify-center'
+            : 'flex-1 flex flex-col justify-start overflow-y-auto scrollbar-thin pr-1.5 py-1'
+        }`}
+      >
+        {/* ========================================================================= */}
+        {/* LUỒNG A: ĐĂNG NHẬP (AUTH-03) — CĂN GIỮA THEO TRỤC DỌC                     */}
+        {/* ========================================================================= */}
+        {mode === 'login' && (
+          <div className="auth-view-transition w-full space-y-4">
+            <form onSubmit={handleLoginSubmit} noValidate className="space-y-3.5">
+              {/* PhoneInput */}
               <div className="space-y-1.5">
-                <label htmlFor="reg-step1-phone" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Số điện thoại đăng ký
+                <label htmlFor="login-phone" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Số điện thoại
                 </label>
                 <PhoneInput
-                  id="reg-step1-phone"
-                  value={registerPhone}
+                  ref={phoneInputRef}
+                  id="login-phone"
+                  value={loginPhone}
                   onChange={(val) => {
-                    setRegisterPhone(val);
+                    setLoginPhone(val);
                     clearFieldError('phone');
-                    saveAuthDraft({ registerDraft: { ...initialDraft.registerDraft, phone: val } });
+                    saveAuthDraft({ loginPhone: val });
                   }}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || lockoutSeconds !== null}
                   error={fieldErrors.phone}
                 />
-                {fieldErrors.phone && fieldErrors.phone.includes('đã được đăng ký') && (
-                  <div className="pt-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLoginPhone(registerPhone);
-                        switchMode('login');
-                      }}
-                      className="text-xs font-bold underline text-slate-900 dark:text-slate-100"
-                    >
-                      Chuyển sang Đăng nhập với số này
-                    </button>
-                  </div>
-                )}
               </div>
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full h-11 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Đang gửi mã</span>
-                  </>
-                ) : (
-                  <span>Gửi mã OTP</span>
-                )}
-              </button>
-            </form>
-          ) : (
-            /* Bước 2: Điền thông tin & xác thực OTP hoàn tất */
-            <form onSubmit={handleRegisterSubmit} noValidate className="space-y-3.5">
-              {/* OTP Input Card */}
-              <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-800">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Mã xác thực OTP gửi đến
-                    </span>
-                    <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100">
-                      {maskPhone(normalizePhoneToZero(registerPhone))}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleResetRegisterForm}
-                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 inline-flex items-center gap-1 cursor-pointer"
-                    title="Đổi số điện thoại khác"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    <span>Đổi số</span>
-                  </button>
-                </div>
-
-                <div className="text-[11px] font-mono text-slate-500 mb-2">
-                  Mã có hiệu lực trong: <strong className="text-slate-700 dark:text-slate-300">{formatCountdown(registerOtpExpires)}</strong>
-                </div>
-
-                <OtpInput
-                  value={registerOtp}
-                  onChange={(val) => {
-                    setRegisterOtp(val);
-                    authMemoryState.registerOtp = val;
-                    clearFieldError('otpCode');
-                  }}
-                  disabled={isSubmitting}
-                  error={fieldErrors.otpCode}
-                />
-
-                <div className="mt-2.5 text-right">
-                  <button
-                    type="button"
-                    onClick={handleResendRegisterOtp}
-                    disabled={registerCooldown > 0 || isSubmitting}
-                    className="text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:underline disabled:text-slate-400 disabled:no-underline cursor-pointer"
-                  >
-                    {registerCooldown > 0 ? `Gửi lại sau ${registerCooldown}s` : 'Gửi lại mã OTP'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Họ và tên */}
+              {/* Password input */}
               <div className="space-y-1.5">
-                <label htmlFor="reg-fullname" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Họ và tên <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="login-password" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Mật khẩu
+                  </label>
+                  {capsLockOn && (
+                    <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1.5 py-0.5 rounded">
+                      Bật Caps Lock
+                    </span>
+                  )}
+                </div>
                 <div className="relative flex items-center">
                   <div className="absolute left-3.5 text-slate-400 pointer-events-none">
-                    <User className="w-4 h-4" />
+                    <Lock className="w-4 h-4" />
                   </div>
                   <input
-                    id="reg-fullname"
-                    type="text"
-                    value={registerFullName}
+                    id="login-password"
+                    type="password"
+                    value={loginPassword}
                     onChange={(e) => {
-                      setRegisterFullName(e.target.value);
-                      clearFieldError('fullName');
-                      saveAuthDraft({ registerDraft: { ...initialDraft.registerDraft, fullName: e.target.value } });
+                      setLoginPassword(e.target.value);
+                      authMemoryState.loginPassword = e.target.value;
+                      clearFieldError('password');
                     }}
-                    placeholder="Nguyễn Văn A"
-                    autoComplete="name"
-                    disabled={isSubmitting}
-                    className={`w-full h-11 pl-10 pr-3.5 text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100 disabled:opacity-50 ${
-                      fieldErrors.fullName
-                        ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800'
+                    onKeyDown={handlePasswordKeyDown}
+                    onKeyUp={handlePasswordKeyDown}
+                    placeholder="Nhập mật khẩu"
+                    autoComplete="current-password"
+                    disabled={isSubmitting || lockoutSeconds !== null}
+                    className={`w-full h-10 pl-10 pr-3.5 text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${
+                      fieldErrors.password
+                        ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800 dark:bg-rose-950/20'
                         : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700'
                     }`}
                   />
                 </div>
-                {fieldErrors.fullName && (
-                  <p className="text-xs text-rose-500 font-medium mt-1">{fieldErrors.fullName}</p>
+                {fieldErrors.password && (
+                  <p className="text-xs text-rose-500 font-medium mt-1">{fieldErrors.password}</p>
                 )}
               </div>
 
-              {/* Giới tính */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Giới tính <span className="text-rose-500">*</span>
+              {/* Forgot Password link */}
+              <div className="flex items-center justify-end pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (loginPhone.trim()) {
+                      setForgotPhone(loginPhone);
+                      saveAuthDraft({ forgotDraft: { ...initialDraft.forgotDraft, phone: loginPhone } });
+                    }
+                    handleSwitchMode('forgot_password');
+                  }}
+                  className="text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:underline cursor-pointer"
+                >
+                  Quên mật khẩu?
+                </button>
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={isSubmitting || lockoutSeconds !== null}
+                className="w-full h-10 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none mt-2"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang xử lý</span>
+                  </>
+                ) : (
+                  <span>Đăng nhập</span>
+                )}
+              </button>
+            </form>
+
+            <div className="text-center text-xs text-slate-500 pt-1">
+              Chưa có tài khoản?{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  if (loginPhone.trim()) {
+                    setRegisterPhone(loginPhone);
+                    saveAuthDraft({ registerDraft: { ...initialDraft.registerDraft, phone: loginPhone } });
+                  }
+                  handleSwitchMode('register');
+                }}
+                className="font-semibold text-slate-900 dark:text-slate-100 hover:underline cursor-pointer"
+              >
+                Đăng ký
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* LUỒNG B: ĐĂNG KÝ (COMPACT 5-ROW FORM VỪA KHÍT KHUNG 620PX)                */}
+        {/* ========================================================================= */}
+        {mode === 'register' && (
+          <div className="auth-view-transition w-full py-0.5">
+            <form onSubmit={handleRegisterSubmit} noValidate className="space-y-2.5">
+              {/* HÀNG 1: Số điện thoại + Nút Gửi OTP nằm cùng 1 hàng */}
+              <div className="space-y-1">
+                <label htmlFor="reg-phone" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Số điện thoại <span className="text-rose-500">*</span>
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { value: 'MALE', label: 'Nam' },
-                    { value: 'FEMALE', label: 'Nữ' },
-                    { value: 'OTHER', label: 'Khác' },
-                  ].map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => {
-                        setRegisterGender(item.value as Gender);
-                        clearFieldError('gender');
-                        saveAuthDraft({ registerDraft: { ...initialDraft.registerDraft, gender: item.value as Gender } });
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1">
+                    <PhoneInput
+                      id="reg-phone"
+                      value={registerPhone}
+                      onChange={(val) => {
+                        setRegisterPhone(val);
+                        clearFieldError('phone');
+                        saveAuthDraft({ registerDraft: { ...initialDraft.registerDraft, phone: val } });
                       }}
-                      className={`h-10 rounded-xl border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center ${
-                        registerGender === item.value
-                          ? 'border-slate-950 bg-slate-950 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900 shadow-2xs'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-slate-300'
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
+                      disabled={isSubmitting}
+                      error={fieldErrors.phone}
+                      placeholder="Nhập số điện thoại"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRegisterRequestOtp}
+                    disabled={isSubmitting || isSendingOtp || registerCooldown > 0 || !registerPhone.trim()}
+                    className="h-10 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-xs whitespace-nowrap transition-all shadow-xs disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center shrink-0 cursor-pointer"
+                  >
+                    {isSendingOtp ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : registerCooldown > 0 ? (
+                      `Gửi lại (${registerCooldown}s)`
+                    ) : isOtpSent ? (
+                      'Gửi lại OTP'
+                    ) : (
+                      'Gửi mã OTP'
+                    )}
+                  </button>
                 </div>
-                {fieldErrors.gender && (
-                  <p className="text-xs text-rose-500 font-medium mt-1">{fieldErrors.gender}</p>
-                )}
               </div>
 
-              {/* Email & Ngày sinh */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Email */}
-                <div className="space-y-1.5">
+              {/* HÀNG 2: Mã xác thực OTP (chỉ mở ra sau khi bấm gửi OTP) */}
+              {isOtpSent && (
+                <div className="p-2.5 sm:p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200/70 dark:border-slate-800/80 space-y-1.5 animate-in fade-in-50 duration-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Mã OTP đã gửi tới {maskPhone(normalizePhoneToZero(registerPhone))}
+                    </span>
+                    {registerOtpExpires > 0 && (
+                      <span className="text-[11px] font-mono text-slate-500">
+                        Hết hạn: <strong className="text-slate-800 dark:text-slate-200">{formatCountdown(registerOtpExpires)}</strong>
+                      </span>
+                    )}
+                  </div>
+                  <OtpInput
+                    value={registerOtp}
+                    onChange={(val) => {
+                      setRegisterOtp(val);
+                      authMemoryState.registerOtp = val;
+                      clearFieldError('otpCode');
+                    }}
+                    disabled={isSubmitting}
+                    error={fieldErrors.otpCode}
+                  />
+                </div>
+              )}
+
+              {/* HÀNG 3: Họ và tên (60%) + Giới tính (40%) nằm cùng 1 hàng */}
+              <div className="grid grid-cols-[3fr_2fr] gap-2.5 items-start">
+                <div className="space-y-1">
+                  <label htmlFor="reg-fullname" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Họ và tên <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative flex items-center">
+                    <div className="absolute left-3 text-slate-400 pointer-events-none">
+                      <User className="w-4 h-4" />
+                    </div>
+                    <input
+                      id="reg-fullname"
+                      type="text"
+                      value={registerFullName}
+                      onChange={(e) => {
+                        setRegisterFullName(e.target.value);
+                        clearFieldError('fullName');
+                        saveAuthDraft({ registerDraft: { ...initialDraft.registerDraft, fullName: e.target.value } });
+                      }}
+                      placeholder="Nguyễn Văn A"
+                      autoComplete="name"
+                      disabled={isSubmitting}
+                      className={`w-full h-10 pl-9 pr-3 text-xs sm:text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100 disabled:opacity-50 ${
+                        fieldErrors.fullName
+                          ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800'
+                          : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
+                      }`}
+                    />
+                  </div>
+                  {fieldErrors.fullName && (
+                    <p className="text-[11px] text-rose-500 font-medium mt-0.5">{fieldErrors.fullName}</p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label htmlFor="reg-gender" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Giới tính <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative flex items-center">
+                    <select
+                      id="reg-gender"
+                      value={registerGender}
+                      onChange={(e) => {
+                        setRegisterGender(e.target.value as Gender);
+                        clearFieldError('gender');
+                        saveAuthDraft({ registerDraft: { ...initialDraft.registerDraft, gender: e.target.value as Gender } });
+                      }}
+                      disabled={isSubmitting}
+                      className="w-full h-10 px-3 pr-8 text-xs sm:text-sm font-medium rounded-xl border bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-1 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100 appearance-none cursor-pointer"
+                    >
+                      <option value="MALE">Nam</option>
+                      <option value="FEMALE">Nữ</option>
+                      <option value="OTHER">Khác</option>
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 pointer-events-none" />
+                  </div>
+                  {fieldErrors.gender && (
+                    <p className="text-[11px] text-rose-500 font-medium mt-0.5">{fieldErrors.gender}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* HÀNG 4: Email + Ngày sinh nằm cùng 1 hàng */}
+              <div className="grid grid-cols-2 gap-2.5 items-start">
+                <div className="space-y-1">
                   <label htmlFor="reg-email" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Email <span className="text-slate-400 font-normal">(tùy chọn)</span>
                   </label>
@@ -1298,12 +1198,11 @@ export const AuthCard: React.FC<AuthCardProps> = ({
                     />
                   </div>
                   {fieldErrors.email && (
-                    <p className="text-xs text-rose-500 font-medium mt-1">{fieldErrors.email}</p>
+                    <p className="text-[11px] text-rose-500 font-medium mt-0.5">{fieldErrors.email}</p>
                   )}
                 </div>
 
-                {/* Ngày sinh */}
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <label htmlFor="reg-birthday" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Ngày sinh <span className="text-slate-400 font-normal">(tùy chọn)</span>
                   </label>
@@ -1329,268 +1228,345 @@ export const AuthCard: React.FC<AuthCardProps> = ({
                     />
                   </div>
                   {fieldErrors.birthday && (
-                    <p className="text-xs text-rose-500 font-medium mt-1">{fieldErrors.birthday}</p>
+                    <p className="text-[11px] text-rose-500 font-medium mt-0.5">{fieldErrors.birthday}</p>
                   )}
                 </div>
               </div>
 
-              {/* Mật khẩu */}
-              {/* Mật khẩu chuẩn BR-01 với Thanh đo độ mạnh & Checklist */}
-              <PasswordInputWithStrength
-                id="reg-password"
-                label="Mật khẩu"
-                value={registerPassword}
-                onChange={(val) => {
-                  setRegisterPassword(val);
-                  authMemoryState.registerPassword = val;
-                  clearFieldError('password');
-                }}
-                placeholder="Nhập mật khẩu (8–64 ký tự)"
-                disabled={isSubmitting}
-                error={fieldErrors.password}
-                required
-                autoComplete="new-password"
-                onKeyDown={handlePasswordKeyDown}
-                capsLockOn={capsLockOn}
-              />
+              {/* HÀNG 5: Mật khẩu + Xác nhận mật khẩu nằm cùng 1 hàng */}
+              <div className="grid grid-cols-2 gap-2.5 items-start">
+                <div>
+                  <PasswordInputWithStrength
+                    id="reg-password"
+                    label="Mật khẩu"
+                    value={registerPassword}
+                    onChange={(val) => {
+                      setRegisterPassword(val);
+                      authMemoryState.registerPassword = val;
+                      clearFieldError('password');
+                    }}
+                    placeholder="8–64 ký tự"
+                    disabled={isSubmitting}
+                    error={fieldErrors.password}
+                    required
+                    autoComplete="new-password"
+                    onKeyDown={handlePasswordKeyDown}
+                    capsLockOn={capsLockOn}
+                  />
+                </div>
+                <div>
+                  <ConfirmPasswordInput
+                    id="reg-confirm-password"
+                    label="Xác nhận mật khẩu"
+                    value={registerConfirmPassword}
+                    targetPassword={registerPassword}
+                    onChange={(val) => {
+                      setRegisterConfirmPassword(val);
+                      authMemoryState.registerConfirmPassword = val;
+                      clearFieldError('confirmPassword');
+                    }}
+                    placeholder="Nhập lại mật khẩu"
+                    disabled={isSubmitting}
+                    error={fieldErrors.confirmPassword}
+                    required
+                    autoComplete="new-password"
+                    onKeyDown={handlePasswordKeyDown}
+                    capsLockOn={capsLockOn}
+                  />
+                </div>
+              </div>
 
-              {/* Xác nhận mật khẩu với chỉ báo khớp theo thời gian thực */}
-              <ConfirmPasswordInput
-                id="reg-confirm-password"
-                label="Xác nhận mật khẩu"
-                value={registerConfirmPassword}
-                targetPassword={registerPassword}
-                onChange={(val) => {
-                  setRegisterConfirmPassword(val);
-                  authMemoryState.registerConfirmPassword = val;
-                  clearFieldError('confirmPassword');
-                }}
-                placeholder="Nhập lại mật khẩu"
-                disabled={isSubmitting}
-                error={fieldErrors.confirmPassword}
-                required
-                autoComplete="new-password"
-                onKeyDown={handlePasswordKeyDown}
-                capsLockOn={capsLockOn}
-              />
-
-              {/* Action buttons */}
-              <div className="flex gap-2.5 pt-2">
+              {/* Forgot Password link */}
+              <div className="flex items-center justify-end pt-0.5">
                 <button
                   type="button"
-                  onClick={() => setRegisterStep(1)}
-                  disabled={isSubmitting}
-                  className="px-4 h-11 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 cursor-pointer transition-colors"
-                >
-                  Quay lại
-                </button>
-                <button
-                  type="submit"
-                  disabled={
-                    isSubmitting ||
-                    !evaluatePasswordStrength(registerPassword).isValidBR01 ||
-                    registerPassword !== registerConfirmPassword ||
-                    !registerFullName.trim() ||
-                    registerOtp.trim().length !== 6
-                  }
-                  className="flex-1 h-11 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Đang hoàn tất</span>
-                    </>
-                  ) : (
-                    <span>Đăng ký</span>
-                  )}
-                </button>
-              </div>
-
-              {/* Reassuring Draft Auto-saved Indicator */}
-              <div className="flex items-center justify-center gap-1.5 pt-1 text-[11px] text-slate-400 dark:text-slate-500 font-medium select-none">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                <span>Đã tự động lưu nháp thông tin</span>
-              </div>
-            </form>
-          )}
-
-          {/* Bottom Switch Link */}
-          <div className="mt-6 text-center text-xs text-slate-500">
-            Đã có tài khoản?{' '}
-            <button
-              type="button"
-              onClick={() => {
-                setLoginPhone(registerPhone);
-                switchMode('login');
-              }}
-              className="font-semibold text-slate-900 dark:text-slate-100 hover:underline cursor-pointer"
-            >
-              Đăng nhập ngay
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* LUỒNG C: QUÊN MẬT KHẨU (AUTH-09 -> AUTH-10 -> AUTH-11) */}
-      {/* ========================================================================= */}
-      {mode === 'forgot_password' && (
-        <div className="auth-view-transition">
-          {/* Stepper Progress */}
-          <div className="flex items-center justify-between mb-5 px-1">
-            <div className="flex items-center gap-1.5">
-              <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  forgotStep >= 1
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
-                }`}
-              >
-                1
-              </div>
-              <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">Gửi OTP</span>
-            </div>
-            <div className="h-0.5 flex-1 mx-2 bg-slate-200 dark:bg-slate-800" />
-            <div className="flex items-center gap-1.5">
-              <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  forgotStep >= 2
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
-                }`}
-              >
-                2
-              </div>
-              <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">Xác thực</span>
-            </div>
-            <div className="h-0.5 flex-1 mx-2 bg-slate-200 dark:bg-slate-800" />
-            <div className="flex items-center gap-1.5">
-              <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  forgotStep >= 3
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
-                }`}
-              >
-                3
-              </div>
-              <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">Mật khẩu mới</span>
-            </div>
-          </div>
-
-          {/* Bước 1: Nhập Số điện thoại yêu cầu OTP (AUTH-09) */}
-          {forgotStep === 1 && (
-            <form onSubmit={handleForgotRequestOtp} noValidate className="space-y-4">
-              <div className="space-y-1.5">
-                <label htmlFor="forgot-phone" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Số điện thoại tài khoản
-                </label>
-                <PhoneInput
-                  id="forgot-phone"
-                  value={forgotPhone}
-                  onChange={(val) => {
-                    setForgotPhone(val);
-                    clearFieldError('phone');
-                    saveAuthDraft({ forgotDraft: { ...initialDraft.forgotDraft, phone: val } });
+                  onClick={() => {
+                    if (registerPhone.trim()) {
+                      setForgotPhone(registerPhone);
+                      saveAuthDraft({ forgotDraft: { ...initialDraft.forgotDraft, phone: registerPhone } });
+                    }
+                    handleSwitchMode('forgot_password');
                   }}
-                  disabled={isSubmitting}
-                  error={fieldErrors.phone}
-                />
+                  className="text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:underline cursor-pointer"
+                >
+                  Quên mật khẩu?
+                </button>
               </div>
 
+              {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full h-11 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
+                disabled={
+                  isSubmitting ||
+                  !isOtpSent ||
+                  registerOtp.trim().length !== 6 ||
+                  !registerFullName.trim() ||
+                  !evaluatePasswordStrength(registerPassword).isValidBR01 ||
+                  registerPassword !== registerConfirmPassword
+                }
+                className="w-full h-10 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none mt-1.5"
               >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Đang gửi mã</span>
+                    <span>Đang xử lý</span>
                   </>
                 ) : (
-                  <span>Tiếp tục</span>
+                  <span>Đăng ký</span>
                 )}
               </button>
             </form>
-          )}
 
-          {/* Bước 2: Xác thực OTP nhận resetToken (AUTH-10) */}
-          {forgotStep === 2 && (
-            <form onSubmit={handleForgotVerifyOtp} noValidate className="space-y-4">
-              <div className="text-center py-2">
-                <span className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-3">
-                  Nhập mã 6 chữ số đã gửi đến {maskPhone(normalizePhoneToZero(forgotPhone))}
-                </span>
-                <OtpInput
-                  value={forgotOtp}
-                  onChange={(val) => {
-                    setForgotOtp(val);
-                    authMemoryState.forgotOtp = val;
-                    clearFieldError('otpCode');
-                  }}
-                  disabled={isSubmitting}
-                  error={fieldErrors.otpCode}
-                />
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => handleForgotRequestOtp({ preventDefault: () => {} } as React.FormEvent)}
-                    disabled={forgotCooldown > 0 || isSubmitting}
-                    className="text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:underline disabled:text-slate-400 disabled:no-underline cursor-pointer"
-                  >
-                    {forgotCooldown > 0 ? `Gửi lại sau ${forgotCooldown}s` : 'Gửi lại mã OTP'}
-                  </button>
+            <div className="text-center text-xs text-slate-500 pt-1">
+              Đã có tài khoản?{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  if (registerPhone.trim()) {
+                    setLoginPhone(registerPhone);
+                    saveAuthDraft({ loginPhone: registerPhone });
+                  }
+                  handleSwitchMode('login');
+                }}
+                className="font-semibold text-slate-900 dark:text-slate-100 hover:underline cursor-pointer"
+              >
+                Đăng nhập
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* LUỒNG C: QUÊN MẬT KHẨU 3 BƯỚC (CĂN GIỮA THEO TRỤC DỌC)                     */}
+        {/* ========================================================================= */}
+        {mode === 'forgot_password' && (
+          <div className="auth-view-transition w-full space-y-4">
+            {/* Stepper indicator */}
+            <div className="flex items-center justify-center gap-2 mb-2">
+              {[
+                { num: 1, label: 'Số điện thoại' },
+                { num: 2, label: 'Mã OTP' },
+                { num: 3, label: 'Mật khẩu mới' },
+              ].map((step, idx) => (
+                <React.Fragment key={step.num}>
+                  <div className="flex items-center gap-1.5">
+                    <div
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                        forgotStep >= step.num
+                          ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {step.num}
+                    </div>
+                    <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                      {step.label}
+                    </span>
+                  </div>
+                  {idx < 2 && <div className="w-6 h-[1px] bg-slate-200 dark:bg-slate-800" />}
+                </React.Fragment>
+              ))}
+            </div>
+
+            {/* Bước 1: Yêu cầu OTP */}
+            {forgotStep === 1 && (
+              <form onSubmit={handleForgotRequestOtp} noValidate className="space-y-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="forgot-phone" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Số điện thoại tài khoản
+                  </label>
+                  <PhoneInput
+                    id="forgot-phone"
+                    value={forgotPhone}
+                    onChange={(val) => {
+                      setForgotPhone(val);
+                      clearFieldError('phone');
+                      saveAuthDraft({ forgotDraft: { ...initialDraft.forgotDraft, phone: val } });
+                    }}
+                    disabled={isSubmitting}
+                    error={fieldErrors.phone}
+                  />
                 </div>
-              </div>
 
-              <div className="flex gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setForgotStep(1);
-                    saveAuthDraft({ forgotStep: 1 });
-                  }}
-                  disabled={isSubmitting}
-                  className="px-4 h-11 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900 cursor-pointer transition-colors"
-                >
-                  Quay lại
-                </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 h-11 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="w-full h-10 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
                 >
                   {isSubmitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Đang xác thực</span>
+                      <span>Đang xử lý</span>
                     </>
                   ) : (
                     <span>Tiếp tục</span>
                   )}
                 </button>
+              </form>
+            )}
+
+            {/* Bước 2: Xác thực OTP */}
+            {forgotStep === 2 && (
+              <form onSubmit={handleForgotVerifyOtp} noValidate className="space-y-4">
+                <div className="text-center py-1">
+                  <span className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-3">
+                    Nhập mã 6 chữ số đã gửi đến {maskPhone(normalizePhoneToZero(forgotPhone))}
+                  </span>
+                  <OtpInput
+                    value={forgotOtp}
+                    onChange={(val) => {
+                      setForgotOtp(val);
+                      authMemoryState.forgotOtp = val;
+                      clearFieldError('otpCode');
+                    }}
+                    disabled={isSubmitting}
+                    error={fieldErrors.otpCode}
+                  />
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => handleForgotRequestOtp({ preventDefault: () => {} } as React.FormEvent)}
+                      disabled={forgotCooldown > 0 || isSubmitting}
+                      className="text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:underline disabled:text-slate-400 disabled:no-underline cursor-pointer"
+                    >
+                      {forgotCooldown > 0 ? `${forgotCooldown}s` : 'Gửi lại mã'}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting || forgotOtp.trim().length !== 6}
+                  className="w-full h-10 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 mt-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Đang xử lý</span>
+                    </>
+                  ) : (
+                    <span>Tiếp tục</span>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {/* Bước 3: Đặt lại mật khẩu mới */}
+            {forgotStep === 3 && (
+              <form onSubmit={handleForgotResetPassword} noValidate className="space-y-3.5">
+                <PasswordInputWithStrength
+                  id="forgot-new-pwd"
+                  label="Mật khẩu mới"
+                  value={forgotNewPassword}
+                  onChange={(val) => {
+                    setForgotNewPassword(val);
+                    authMemoryState.forgotNewPassword = val;
+                    clearFieldError('newPassword');
+                  }}
+                  placeholder="Nhập mật khẩu mới (8–64 ký tự)"
+                  disabled={isSubmitting}
+                  error={fieldErrors.newPassword}
+                  required
+                  autoComplete="new-password"
+                  onKeyDown={handlePasswordKeyDown}
+                  capsLockOn={capsLockOn}
+                />
+
+                <ConfirmPasswordInput
+                  id="forgot-confirm-pwd"
+                  label="Xác nhận mật khẩu mới"
+                  value={forgotConfirmPassword}
+                  targetPassword={forgotNewPassword}
+                  onChange={(val) => {
+                    setForgotConfirmPassword(val);
+                    authMemoryState.forgotConfirmPassword = val;
+                    clearFieldError('confirmPassword');
+                  }}
+                  placeholder="Nhập lại mật khẩu mới"
+                  disabled={isSubmitting}
+                  error={fieldErrors.confirmPassword}
+                  required
+                  autoComplete="new-password"
+                  onKeyDown={handlePasswordKeyDown}
+                  capsLockOn={capsLockOn}
+                />
+
+                <button
+                  type="submit"
+                  disabled={
+                    isSubmitting ||
+                    !evaluatePasswordStrength(forgotNewPassword).isValidBR01 ||
+                    forgotNewPassword !== forgotConfirmPassword
+                  }
+                  className="w-full h-10 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none mt-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Đang xử lý</span>
+                    </>
+                  ) : (
+                    <span>Đặt lại mật khẩu</span>
+                  )}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* LUỒNG D: ĐỔI MẬT KHẨU BẮT BUỘC (AUTH-08)                                  */}
+        {/* ========================================================================= */}
+        {mode === 'forced_change_password' && (
+          <div className="auth-view-transition w-full space-y-3.5">
+            <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-900/60 rounded-xl text-blue-800 dark:text-blue-300 text-xs flex items-start gap-2">
+              <KeyRound className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                Tài khoản mới cần cập nhật mật khẩu lần đầu để tiếp tục sử dụng.
+              </div>
+            </div>
+
+            <form onSubmit={handleForcedChangePassword} noValidate className="space-y-3">
+              {/* Mật khẩu hiện tại */}
+              <div className="space-y-1">
+                <label htmlFor="forced-current-pwd" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Mật khẩu hiện tại
+                </label>
+                <div className="relative flex items-center">
+                  <div className="absolute left-3.5 text-slate-400 pointer-events-none">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    id="forced-current-pwd"
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => {
+                      setCurrentPassword(e.target.value);
+                      authMemoryState.currentPassword = e.target.value;
+                      clearFieldError('currentPassword');
+                    }}
+                    placeholder="Nhập mật khẩu hiện tại"
+                    disabled={isSubmitting}
+                    className={`w-full h-10 pl-10 pr-3.5 text-xs sm:text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100 disabled:opacity-50 ${
+                      fieldErrors.currentPassword
+                        ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800'
+                        : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
+                    }`}
+                  />
+                </div>
+                {fieldErrors.currentPassword && (
+                  <p className="text-xs text-rose-500 font-medium mt-1">{fieldErrors.currentPassword}</p>
+                )}
               </div>
 
-              {/* Draft auto-saved indicator */}
-              <div className="flex items-center justify-center gap-1.5 pt-1 text-[11px] text-slate-400 dark:text-slate-500 font-medium select-none">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                <span>Đã tự động lưu nháp thông tin</span>
-              </div>
-            </form>
-          )}
-
-          {/* Bước 3: Đặt lại mật khẩu mới (AUTH-11) */}
-          {forgotStep === 3 && (
-            <form onSubmit={handleForgotResetPassword} noValidate className="space-y-3.5">
-              {/* Mật khẩu mới chuẩn BR-01 với Thanh đo độ mạnh & Checklist */}
+              {/* Mật khẩu mới */}
               <PasswordInputWithStrength
-                id="forgot-new-pwd"
+                id="forced-new-pwd"
                 label="Mật khẩu mới"
-                value={forgotNewPassword}
+                value={forcedNewPassword}
                 onChange={(val) => {
-                  setForgotNewPassword(val);
-                  authMemoryState.forgotNewPassword = val;
+                  setForcedNewPassword(val);
+                  authMemoryState.forcedNewPassword = val;
                   clearFieldError('newPassword');
                 }}
                 placeholder="Nhập mật khẩu mới (8–64 ký tự)"
@@ -1604,13 +1580,13 @@ export const AuthCard: React.FC<AuthCardProps> = ({
 
               {/* Xác nhận mật khẩu mới */}
               <ConfirmPasswordInput
-                id="forgot-confirm-pwd"
+                id="forced-confirm-pwd"
                 label="Xác nhận mật khẩu mới"
-                value={forgotConfirmPassword}
-                targetPassword={forgotNewPassword}
+                value={forcedConfirmPassword}
+                targetPassword={forcedNewPassword}
                 onChange={(val) => {
-                  setForgotConfirmPassword(val);
-                  authMemoryState.forgotConfirmPassword = val;
+                  setForcedConfirmPassword(val);
+                  authMemoryState.forcedConfirmPassword = val;
                   clearFieldError('confirmPassword');
                 }}
                 placeholder="Nhập lại mật khẩu mới"
@@ -1622,158 +1598,37 @@ export const AuthCard: React.FC<AuthCardProps> = ({
                 capsLockOn={capsLockOn}
               />
 
-              {/* Submit Button */}
               <button
                 type="submit"
                 disabled={
                   isSubmitting ||
-                  !evaluatePasswordStrength(forgotNewPassword).isValidBR01 ||
-                  forgotNewPassword !== forgotConfirmPassword
+                  !currentPassword.trim() ||
+                  !evaluatePasswordStrength(forcedNewPassword).isValidBR01 ||
+                  forcedNewPassword !== forcedConfirmPassword
                 }
-                className="w-full h-11 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none mt-3"
+                className="w-full h-10 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none mt-2"
               >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Đang cập nhật</span>
+                    <span>Đang xử lý</span>
                   </>
                 ) : (
-                  <span>Đặt lại mật khẩu</span>
+                  <span>Đổi mật khẩu</span>
                 )}
               </button>
             </form>
-          )}
-
-          {/* Bottom Back Button */}
-          <div className="mt-6 text-center">
-            <button
-              type="button"
-              onClick={() => switchMode('login')}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors cursor-pointer"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Quay lại đăng nhập</span>
-            </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* ========================================================================= */}
-      {/* LUỒNG D: ĐỔI MẬT KHẨU BẮT BUỘC (AUTH-08) */}
-      {/* ========================================================================= */}
-      {mode === 'forced_change_password' && (
-        <div className="auth-view-transition">
-          <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-900/60 rounded-xl text-blue-800 dark:text-blue-300 text-xs flex items-start gap-2.5">
-            <KeyRound className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-            <div className="leading-relaxed">
-              Tài khoản của bạn được cấp mới ở trạng thái chờ kích hoạt. Vui lòng thiết lập mật khẩu mới để bắt đầu sử dụng.
-            </div>
-          </div>
-
-          <form onSubmit={handleForcedChangePassword} noValidate className="space-y-3.5">
-            {/* Mật khẩu hiện tại */}
-            <div className="space-y-1.5">
-              <label htmlFor="forced-current-pwd" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Mật khẩu hiện tại (được cấp)
-              </label>
-              <div className="relative flex items-center">
-                <div className="absolute left-3.5 text-slate-400 pointer-events-none">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <input
-                  id="forced-current-pwd"
-                  type={showCurrentPassword ? 'text' : 'password'}
-                  value={currentPassword}
-                  onChange={(e) => {
-                    setCurrentPassword(e.target.value);
-                    authMemoryState.currentPassword = e.target.value;
-                    clearFieldError('currentPassword');
-                  }}
-                  placeholder="Nhập mật khẩu hiện tại"
-                  disabled={isSubmitting}
-                  className={`w-full h-11 pl-10 pr-10 text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100 disabled:opacity-50 ${
-                    fieldErrors.currentPassword
-                      ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800'
-                      : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700'
-                  }`}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowCurrentPassword((prev) => !prev)}
-                  tabIndex={-1}
-                  className="absolute right-3.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
-                  aria-label={showCurrentPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
-                >
-                  {showCurrentPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {fieldErrors.currentPassword && (
-                <p className="text-xs text-rose-500 font-medium mt-1">{fieldErrors.currentPassword}</p>
-              )}
-            </div>
-
-            {/* Mật khẩu mới */}
-            {/* Mật khẩu mới chuẩn BR-01 với Thanh đo độ mạnh & Checklist */}
-            <PasswordInputWithStrength
-              id="forced-new-pwd"
-              label="Mật khẩu mới"
-              value={forcedNewPassword}
-              onChange={(val) => {
-                setForcedNewPassword(val);
-                authMemoryState.forcedNewPassword = val;
-                clearFieldError('newPassword');
-              }}
-              placeholder="Nhập mật khẩu mới (8–64 ký tự)"
-              disabled={isSubmitting}
-              error={fieldErrors.newPassword}
-              required
-              autoComplete="new-password"
-              onKeyDown={handlePasswordKeyDown}
-              capsLockOn={capsLockOn}
-            />
-
-            {/* Xác nhận mật khẩu mới */}
-            <ConfirmPasswordInput
-              id="forced-confirm-pwd"
-              label="Xác nhận mật khẩu mới"
-              value={forcedConfirmPassword}
-              targetPassword={forcedNewPassword}
-              onChange={(val) => {
-                setForcedConfirmPassword(val);
-                authMemoryState.forcedConfirmPassword = val;
-                clearFieldError('confirmPassword');
-              }}
-              placeholder="Nhập lại mật khẩu mới"
-              disabled={isSubmitting}
-              error={fieldErrors.confirmPassword}
-              required
-              autoComplete="new-password"
-              onKeyDown={handlePasswordKeyDown}
-              capsLockOn={capsLockOn}
-            />
-
-            <button
-              type="submit"
-              disabled={
-                isSubmitting ||
-                !currentPassword.trim() ||
-                !evaluatePasswordStrength(forcedNewPassword).isValidBR01 ||
-                forcedNewPassword !== forcedConfirmPassword
-              }
-              className="w-full h-11 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-[0.99] dark:bg-slate-50 dark:hover:bg-slate-200 dark:text-slate-900 text-white font-semibold text-sm transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none mt-3"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Đang cập nhật</span>
-                </>
-              ) : (
-                <span>Đổi mật khẩu & Kích hoạt</span>
-              )}
-            </button>
-          </form>
-        </div>
-      )}
+      {/* ------------------------------------------------------------- */}
+      {/* FOOTER: Fixed at bottom of 620px panel                         */}
+      {/* ------------------------------------------------------------- */}
+      <div className="shrink-0 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500">
+        <span>Bảo mật & Điều khoản sử dụng BookHub</span>
+        <span>Hỗ trợ: 1900 6868</span>
+      </div>
     </div>
   );
 };

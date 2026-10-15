@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { User, Award, Coins, KeyRound } from 'lucide-react';
+import { User, Award, Coins, KeyRound, Lock } from 'lucide-react';
 import {
   useUserProfileQuery,
   useUpdateProfileMutation,
@@ -9,8 +9,11 @@ import {
 } from '../hooks/useUserQueries';
 import { TierProgressBar } from '../components/TierProgressBar';
 import { updateProfileSchema, UpdateProfileFormData } from '../schemas/userSchemas';
-import { changePasswordSchema, ChangePasswordFormData } from '@/modules/auth/schemas/authSchemas';
+import { evaluatePasswordStrength } from '@/modules/auth/schemas/authSchemas';
 import { authApi } from '@/modules/auth/api/authApi';
+import { PasswordInputWithStrength } from '@/modules/auth/components/PasswordInputWithStrength';
+import { ConfirmPasswordInput } from '@/modules/auth/components/ConfirmPasswordInput';
+import { tokenManager } from '@/core/http/tokenManager';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -43,31 +46,63 @@ export const CustomerProfilePage: React.FC = () => {
     },
   });
 
-  // Password Form
-  const {
-    register: registerPassword,
-    handleSubmit: handleSubmitPassword,
-    reset: resetPasswordForm,
-    formState: { errors: passwordErrors },
-  } = useForm<ChangePasswordFormData>({
-    resolver: zodResolver(changePasswordSchema),
-  });
+  const [capsLockOn, setCapsLockOn] = useState(false);
+
+  // Password Form State
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordFieldErrors, setPasswordFieldErrors] = useState<Record<string, string>>({});
+
+  const handlePasswordKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    setCapsLockOn(e.getModifierState && e.getModifierState('CapsLock'));
+  };
 
   const onUpdateProfile = (data: UpdateProfileFormData) => {
     updateProfileMutation.mutate(data);
   };
 
-  const onChangePassword = async (data: ChangePasswordFormData) => {
+  const onChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const errors: Record<string, string> = {};
+    if (!currentPassword.trim()) {
+      errors.currentPassword = 'Vui lòng nhập mật khẩu hiện tại';
+    }
+    if (!newPassword.trim()) {
+      errors.newPassword = 'Vui lòng nhập mật khẩu mới';
+    } else if (!evaluatePasswordStrength(newPassword).isValidBR01) {
+      errors.newPassword = 'Mật khẩu mới chưa đáp ứng đầy đủ tiêu chuẩn BR-01';
+    }
+    if (newPassword !== confirmPassword) {
+      errors.confirmPassword = 'Mật khẩu xác nhận không trùng khớp';
+    }
+    if (Object.keys(errors).length > 0) {
+      setPasswordFieldErrors(errors);
+      return;
+    }
+    setPasswordFieldErrors({});
     setIsChangingPassword(true);
     try {
-      await authApi.changePassword({
-        currentPassword: data.currentPassword,
-        newPassword: data.newPassword,
+      const res = await authApi.changePassword({
+        currentPassword,
+        newPassword,
       });
+      tokenManager.setTokens(res.accessToken, res.refreshToken);
       toast.success('Đổi mật khẩu thành công!');
-      resetPasswordForm();
-    } catch {
-      toast.error('Mật khẩu hiện tại không chính xác');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: unknown) {
+      const error = err as { code?: string; message?: string };
+      if (error?.code === 'CURRENT_PASSWORD_INCORRECT') {
+        setPasswordFieldErrors({ currentPassword: 'Mật khẩu hiện tại không chính xác' });
+        toast.error('Mật khẩu hiện tại không chính xác');
+      } else if (error?.code === 'PASSWORD_REUSED') {
+        setPasswordFieldErrors({ newPassword: 'Mật khẩu mới không được trùng với mật khẩu hiện tại' });
+        toast.error('Mật khẩu mới không được trùng với mật khẩu hiện tại');
+      } else {
+        toast.error(error?.message || 'Đổi mật khẩu không thành công');
+      }
     } finally {
       setIsChangingPassword(false);
     }
@@ -248,37 +283,121 @@ export const CustomerProfilePage: React.FC = () => {
       {/* Tab 4: Change Password */}
       {activeTab === 'password' && (
         <form
-          onSubmit={handleSubmitPassword(onChangePassword)}
-          className="bg-white rounded-2xl border border-slate-200 p-6 shadow-2xs space-y-4 max-w-lg"
+          onSubmit={onChangePassword}
+          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-2xs space-y-4 max-w-lg"
+          noValidate
         >
-          <Input
-            label="Mật khẩu hiện tại"
-            type="password"
-            placeholder="••••••••"
-            required
-            error={passwordErrors.currentPassword?.message}
-            {...registerPassword('currentPassword')}
-          />
-          <Input
+          {/* Mật khẩu hiện tại */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label htmlFor="profile-current-password" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Mật khẩu hiện tại <span className="text-rose-500">*</span>
+              </label>
+              {capsLockOn && (
+                <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950 px-1.5 py-0.5 rounded">
+                  Bật Caps Lock
+                </span>
+              )}
+            </div>
+            <div className="relative flex items-center">
+              <div className="absolute left-3.5 text-slate-400 pointer-events-none">
+                <Lock className="w-4 h-4" />
+              </div>
+              <input
+                id="profile-current-password"
+                type="password"
+                value={currentPassword}
+                onChange={(e) => {
+                  setCurrentPassword(e.target.value);
+                  if (passwordFieldErrors.currentPassword) {
+                    setPasswordFieldErrors((prev) => {
+                      const updated = { ...prev };
+                      delete updated.currentPassword;
+                      return updated;
+                    });
+                  }
+                }}
+                onKeyDown={handlePasswordKeyDown}
+                onKeyUp={handlePasswordKeyDown}
+                placeholder="Nhập mật khẩu hiện tại"
+                disabled={isChangingPassword}
+                autoComplete="current-password"
+                className={`w-full h-10 pl-10 pr-3.5 text-xs sm:text-sm rounded-xl border bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 transition-colors focus:outline-hidden focus:ring-1 focus:ring-slate-950 focus:border-slate-950 dark:focus:ring-slate-100 dark:focus:border-slate-100 disabled:opacity-50 disabled:bg-slate-50 dark:disabled:bg-slate-800 ${
+                  passwordFieldErrors.currentPassword
+                    ? 'border-rose-300 bg-rose-50/30 dark:border-rose-800'
+                    : 'border-slate-200 hover:border-slate-300 dark:border-slate-800'
+                }`}
+              />
+            </div>
+            {passwordFieldErrors.currentPassword && (
+              <p className="text-xs text-rose-500 font-medium mt-1">
+                {passwordFieldErrors.currentPassword}
+              </p>
+            )}
+          </div>
+
+          {/* Mật khẩu mới chuẩn BR-01 với Thanh đo độ mạnh & Checklist */}
+          <PasswordInputWithStrength
+            id="profile-new-password"
             label="Mật khẩu mới"
-            type="password"
-            placeholder="••••••••"
+            value={newPassword}
+            onChange={(val) => {
+              setNewPassword(val);
+              if (passwordFieldErrors.newPassword) {
+                setPasswordFieldErrors((prev) => {
+                  const updated = { ...prev };
+                  delete updated.newPassword;
+                  return updated;
+                });
+              }
+            }}
+            placeholder="Nhập mật khẩu mới (8–64 ký tự)"
+            disabled={isChangingPassword}
+            error={passwordFieldErrors.newPassword}
             required
-            helperText="8-64 ký tự, có ít nhất 1 chữ hoa, 1 chữ thường và 1 số"
-            error={passwordErrors.newPassword?.message}
-            {...registerPassword('newPassword')}
-          />
-          <Input
-            label="Xác nhận mật khẩu mới"
-            type="password"
-            placeholder="••••••••"
-            required
-            error={passwordErrors.confirmPassword?.message}
-            {...registerPassword('confirmPassword')}
+            autoComplete="new-password"
+            onKeyDown={handlePasswordKeyDown}
+            capsLockOn={capsLockOn}
           />
 
-          <Button type="submit" size="md" isLoading={isChangingPassword}>
-            Cập nhật mật khẩu
+          {/* Xác nhận mật khẩu mới */}
+          <ConfirmPasswordInput
+            id="profile-confirm-password"
+            label="Xác nhận mật khẩu mới"
+            value={confirmPassword}
+            targetPassword={newPassword}
+            onChange={(val) => {
+              setConfirmPassword(val);
+              if (passwordFieldErrors.confirmPassword) {
+                setPasswordFieldErrors((prev) => {
+                  const updated = { ...prev };
+                  delete updated.confirmPassword;
+                  return updated;
+                });
+              }
+            }}
+            placeholder="Nhập lại mật khẩu mới"
+            disabled={isChangingPassword}
+            error={passwordFieldErrors.confirmPassword}
+            required
+            autoComplete="new-password"
+            onKeyDown={handlePasswordKeyDown}
+            capsLockOn={capsLockOn}
+          />
+
+          <Button
+            type="submit"
+            size="md"
+            isLoading={isChangingPassword}
+            disabled={
+              isChangingPassword ||
+              !newPassword ||
+              !evaluatePasswordStrength(newPassword).isValidBR01 ||
+              newPassword !== confirmPassword
+            }
+            className="w-full sm:w-auto h-10 px-6 rounded-xl font-semibold text-sm transition-all cursor-pointer bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-slate-200 dark:text-slate-900 text-white shadow-sm"
+          >
+            {isChangingPassword ? 'Đang xử lý' : 'Đổi mật khẩu'}
           </Button>
         </form>
       )}
